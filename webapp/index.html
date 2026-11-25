@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Vekil</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="title-row">
+      <div>
+        <h1 id="product">Vekil</h1>
+        <p class="muted small" id="status-line">Yükleniyor…</p>
+      </div>
+      <label class="switch" title="Asistanı aç/kapat">
+        <input type="checkbox" id="active" disabled>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="setup">Ayarlar</button>
+      <button class="tab" data-tab="try">Dene</button>
+      <button class="tab" data-tab="chats">Sohbetler <span id="handoff-count" class="count" hidden></span></button>
+      <button class="tab" data-tab="plan">Plan</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Setup / profile -->
+    <section id="view-setup" class="view">
+      <article class="card warn" id="connect-card" hidden>
+        <h2>Hesabını bağla</h2>
+        <ol class="steps">
+          <li>Telegram'da <b>Ayarlar → Telegram Business → Sohbet botları</b> bölümünü aç. <span class="muted">(Telegram Premium gerekir)</span></li>
+          <li><b id="bot-handle">bu botu</b> ekle.</li>
+          <li><b>Mesajlara cevap ver</b> iznini aç ve asistanın hangi sohbetlerde çalışacağını seç.</li>
+        </ol>
+        <p class="muted small" id="connect-state"></p>
+      </article>
+
+      <form id="profile" class="card form" autocomplete="off">
+        <h2>İşletme bilgileri</h2>
+        <label>İşletme adı
+          <input name="business_name" maxlength="64" placeholder="Ayşe'nin Pastanesi" required>
+        </label>
+        <label>Ne yapıyorsunuz?
+          <textarea name="about" maxlength="1000" rows="3" placeholder="Kocaeli'de siparişe özel ev yapımı pasta ve kurabiye."></textarea>
+        </label>
+        <label>Bilgi bankası <span class="muted small">Asistan sadece buradaki bilgilerle cevap verir.</span>
+          <textarea name="knowledge" maxlength="8000" rows="8" placeholder="Fiyatlar:&#10;- Doğum günü pastası (8 kişilik): 1.200 TL&#10;Çalışma saatleri: Her gün 09:00–20:00&#10;Teslimat: İzmit içi ücretsiz, en az 2 gün önce sipariş&#10;Ödeme: Havale veya kapıda nakit"></textarea>
+        </label>
+        <label>Üslup
+          <input name="tone" maxlength="300" placeholder="Samimi, kısa, 'siz' diye hitap et, emoji az kullan.">
+        </label>
+        <label>Ne zaman sana devretsin?
+          <textarea name="handoff_note" maxlength="500" rows="2" placeholder="Özel tasarım pasta, 20 kişiden büyük sipariş ve şikayetlerde bana devret."></textarea>
+        </label>
+        <label>Sen bir sohbete yazınca asistan kaç dakika sussun?
+          <input name="pause_minutes" type="number" min="1" max="1440" value="30">
+        </label>
+        <button class="btn" type="submit" id="save">Kaydet</button>
+      </form>
+    </section>
+
+    <!-- Playground -->
+    <section id="view-try" class="view" hidden>
+      <article class="card">
+        <h2>Deneme alanı</h2>
+        <p class="muted small">Müşteri gibi yaz, asistanın nasıl cevap verdiğini gör. Buradaki mesajlar kimseye gitmez.</p>
+        <div id="thread" class="thread" aria-live="polite"></div>
+        <form id="try-form" class="composer">
+          <input id="try-input" maxlength="1000" placeholder="Örn: 10 kişilik pasta ne kadar?" required>
+          <button class="btn" type="submit">Gönder</button>
+        </form>
+        <button class="link small" id="try-reset" type="button">Sohbeti temizle</button>
+      </article>
+    </section>
+
+    <!-- Chats -->
+    <section id="view-chats" class="view" hidden>
+      <div id="chat-list" class="list" aria-live="polite"></div>
+    </section>
+
+    <!-- Plan -->
+    <section id="view-plan" class="view" hidden>
+      <article class="card">
+        <h2 id="plan-title">Plan</h2>
+        <div class="meter"><span id="meter-fill"></span></div>
+        <p id="plan-usage" class="muted"></p>
+        <p id="plan-until" class="muted small"></p>
+      </article>
+      <article class="card" id="buy-card">
+        <h2>Pro</h2>
+        <p><span class="price" id="plan-price"></span> / 30 gün</p>
+        <ul class="ticks" id="plan-features"></ul>
+        <button class="btn wide" id="buy">Stars ile abone ol</button>
+        <p class="muted small">Telegram aboneliği her 30 günde yeniler; Telegram ayarlarından iptal edebilirsin.</p>
+      </article>
+    </section>
+
+    <div id="outside" class="empty" hidden>Bu panel Telegram içinden, bot üzerinden açılmalı.</div>
+  </main>
+
+  <footer class="foot">
+    <button class="link" id="support">Destek</button><span aria-hidden="true">·</span><button class="link" id="terms">Koşullar</button>
+  </footer>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
