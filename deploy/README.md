@@ -1,5 +1,18 @@
 # Yayına alma: https://vekil.siyahkare.com
 
+## Kendi Mac'inde (cloudflared ile, iki uygulama birden)
+
+```bash
+git clone https://github.com/onurmutlu/vekil ~/siyahkare-apps/vekil && bash ~/siyahkare-apps/vekil/deploy/mac.sh
+```
+
+`mac.sh` Vekil'i ve Stars'ı `~/siyahkare-apps` altına kurar, tek bir Cloudflare tunnel'ı
+(`siyahkare-apps`) oluşturup `vekil.siyahkare.com` ve `stars.siyahkare.com` DNS kayıtlarını bağlar,
+üç servisi launchd ile kalıcı hale getirir (bilgisayar açılınca kendiliğinden başlar) ve botları Telegram'a bağlar.
+Tekrar çalıştırmak güvenlidir: kodu günceller, `.env` dosyalarını korur.
+
+## Sunucuda (Docker)
+
 Docker + Cloudflare Tunnel. Sunucuda port açılmaz, HTTPS'i Cloudflare sağlar.
 Bir VPS'te (önerilen: Ubuntu, 1 vCPU / 1 GB yeterli) ya da Docker kurulu bir bilgisayarda çalışır.
 
