@@ -160,7 +160,7 @@ class Vekil:
             return
         extra = {}
         if dashboard:
-            extra["reply_markup"] = {"inline_keyboard": [[{"text": "⚙️ Paneli aç", "web_app": {"url": self.settings.webapp_url}}]]}
+            extra["reply_markup"] = {"inline_keyboard": [[{"text": "⚙️ Paneli aç", "web_app": {"url": self.settings.webapp_url + "/app"}}]]}
         try:
             await self.api("sendMessage", chat_id=chat_id, text=text, **extra)
         except Exception as exc:  # noqa: BLE001 - owner may have blocked the bot

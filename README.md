@@ -1,7 +1,8 @@
 # Vekil: Telegram Business AI asistanı
 
 İşletmenin **kendi Telegram hesabına** bağlanıp müşterilere işletme adına, işletmenin verdiği bilgilerle cevap veren
-AI asistan. İşletme sahibi her şeyi bir Mini App panelinden yönetir ve Telegram Stars ile abone olur.
+AI asistan. Web'den satılan bir SaaS: `/` satış sitesi, `/app` panel. Panel hem tarayıcıda (Telegram ile giriş)
+hem Telegram içinde Mini App olarak açılır. Abonelik Telegram Stars ile.
 
 *English summary at the end.*
 
@@ -39,11 +40,13 @@ app/
   assistant.py  sistem talimatı, sohbet geçmişi dönüşümü, model çıktısının güvenli ayrıştırılması
   llm.py        Anthropic / OpenAI / echo (anahtarsız geliştirme)
   store.py      SQLite tabloları
-  main.py       FastAPI: panel, /api/*, /telegram/webhook
+  main.py       FastAPI: site (/), panel (/app), /api/*, /telegram/webhook
+  webauth.py    web girişi: Telegram Login Widget doğrulaması + imzalı oturum
   cli.py        setup / poll / issues
   initdata.py, telegram.py, config.py
-webapp/         Panel (derleme gerektirmeyen HTML/CSS/JS): Ayarlar · Dene · Sohbetler · Plan
-tests/          31 test
+webapp/site.html  satış sitesi (tek dosya HTML; fiyat ve limitleri /api/public'ten okur)
+webapp/index.html panel: Ayarlar · Dene · Sohbetler · Plan (tarayıcı + Mini App)
+tests/            37 test
 ```
 
 ## Kurulum
@@ -53,10 +56,24 @@ tests/          31 test
 3. `docker compose up -d --build` (ya da `pip install -r requirements.txt && uvicorn app.main:app --factory`).
 4. HTTPS: sunucunun önüne Caddy/Nginx koy ya da geliştirmede `cloudflared tunnel --url http://localhost:8000`.
 5. `python -m app.cli setup`: webhook, *Panel* menü butonu ve komutlar ayarlanır. Business Mode kapalıysa uyarır.
-6. Önce `LLM_PROVIDER=echo` ve `SALES_ENABLED=false` ile dene. Sonra gerçek modelle kendi Business hesabını bağla,
+6. Web girişi için @BotFather'da `/setdomain` ile sitenin alan adını bota tanımla (Telegram Login Widget şartı).
+   `BOT_USERNAME` dolu olmalı.
+7. Önce `LLM_PROVIDER=echo` ve `SALES_ENABLED=false` ile dene. Sonra gerçek modelle kendi Business hesabını bağla,
    başka bir hesaptan mesaj atıp test et. 1 Star'lık geçici bir planla ödeme/iade akışını dene, sonra satışı aç.
 
 Webhook olmadan yerelde: `python -m app.cli poll`.
+
+## Web'de satış ve ödeme
+
+- Ziyaretçi sitede "Ücretsiz başla"ya basar, Telegram ile giriş yapar, paneli tarayıcıda kullanır.
+- Pro'ya geçerken Stars faturası Telegram uygulamasında açılır; panel ödemeyi bekleyip kendini günceller.
+- Kurumsal müşteri TL faturası isterse bu ayrı bir ödeme kanalı gerektirir (ör. iyzico ile web aboneliği);
+  bot ve Mini App içinde dijital hizmet ödemesi Telegram kuralı gereği Stars ile kalmalı.
+
+## Yayına çıkmadan önce (yasal)
+
+- Kullanım koşulları, gizlilik politikası ve KVKK aydınlatma metni sayfaları yazılmalı (sitedeki "Koşullar ve gizlilik" bağlantısı şimdilik panele gidiyor).
+- Mesaj geçmişi için saklama süresi belirlenip otomatik silme eklenmeli.
 
 ## Bilinen sınırlar (MVP)
 

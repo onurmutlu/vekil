@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import initdata
+from . import initdata, webauth
 from .config import Settings
 from .llm import make_llm
 from .service import ServiceError, Vekil, process_update
@@ -29,6 +29,16 @@ class Profile(BaseModel):
     tone: str = Field("", max_length=300)
     handoff_note: str = Field("", max_length=500)
     pause_minutes: int = Field(30, ge=1, le=1440)
+
+
+class TelegramLogin(BaseModel):
+    id: int
+    auth_date: int
+    hash: str
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
 
 
 class Toggle(BaseModel):
@@ -66,14 +76,24 @@ def create_app(settings: Settings | None = None, store: Store | None = None, api
     app = FastAPI(title=settings.product_name, lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.service = service
 
-    def owner(init_data: str | None) -> int:
-        try:
-            user = initdata.validate(init_data or "", settings.bot_token, settings.init_data_max_age)
-        except initdata.InvalidInitData:
-            raise HTTPException(401, "Telegram oturumu doğrulanamadı. Paneli bot üzerinden yeniden aç.") from None
-        name = " ".join(x for x in (user.get("first_name"), user.get("last_name")) if x)
-        store.ensure_account(user["id"], name)
-        return user["id"]
+    def owner(init_data: str | None, authorization: str | None = None) -> int:
+        """Inside Telegram: Mini App initData. On the web: a session from Telegram Login."""
+        if init_data:
+            try:
+                user = initdata.validate(init_data, settings.bot_token, settings.init_data_max_age)
+            except initdata.InvalidInitData:
+                raise HTTPException(401, "Telegram oturumu doğrulanamadı. Paneli yeniden aç.") from None
+            name = " ".join(x for x in (user.get("first_name"), user.get("last_name")) if x)
+            store.ensure_account(user["id"], name)
+            return user["id"]
+        if authorization and authorization.startswith("Bearer "):
+            try:
+                user_id = webauth.read_session(authorization[7:], settings.bot_token)
+            except webauth.AuthError as exc:
+                raise HTTPException(401, str(exc)) from None
+            store.ensure_account(user_id)
+            return user_id
+        raise HTTPException(401, "Giriş yapman gerekiyor.")
 
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, exc: ServiceError):
@@ -83,41 +103,63 @@ def create_app(settings: Settings | None = None, store: Store | None = None, api
     async def health():
         return {"ok": True}
 
+    @app.get("/api/public")
+    async def public():
+        return {"product_name": settings.product_name, "bot_username": settings.bot_username,
+                "trial_replies": settings.trial_replies, "plan_stars": settings.plan_stars,
+                "plan_replies": settings.plan_replies, "sales_enabled": settings.sales_enabled}
+
+    @app.post("/api/auth/telegram")
+    async def telegram_login(body: TelegramLogin):
+        try:
+            user = webauth.verify_login(body.model_dump(), settings.bot_token)
+        except webauth.AuthError as exc:
+            raise HTTPException(401, str(exc)) from None
+        store.ensure_account(user["id"], " ".join(x for x in (user["first_name"], user["last_name"]) if x))
+        return {"token": webauth.issue_session(user["id"], settings.bot_token)}
+
     @app.get("/api/me")
-    async def me(x_telegram_init_data: str | None = Header(None)):
-        return service.view(owner(x_telegram_init_data))
+    async def me(x_telegram_init_data: str | None = Header(None),
+                    authorization: str | None = Header(None)):
+        return service.view(owner(x_telegram_init_data, authorization))
 
     @app.put("/api/profile")
-    async def update_profile(body: Profile, x_telegram_init_data: str | None = Header(None)):
-        owner_id = owner(x_telegram_init_data)
+    async def update_profile(body: Profile, x_telegram_init_data: str | None = Header(None),
+                    authorization: str | None = Header(None)):
+        owner_id = owner(x_telegram_init_data, authorization)
         store.update_profile(owner_id, body.model_dump())
         return service.view(owner_id)
 
     @app.post("/api/active")
-    async def set_active(body: Toggle, x_telegram_init_data: str | None = Header(None)):
-        owner_id = owner(x_telegram_init_data)
+    async def set_active(body: Toggle, x_telegram_init_data: str | None = Header(None),
+                    authorization: str | None = Header(None)):
+        owner_id = owner(x_telegram_init_data, authorization)
         service.set_active(owner_id, body.active)
         return service.view(owner_id)
 
     @app.get("/api/chats")
-    async def chats(x_telegram_init_data: str | None = Header(None)):
-        return service.chats(owner(x_telegram_init_data))
+    async def chats(x_telegram_init_data: str | None = Header(None),
+                    authorization: str | None = Header(None)):
+        return service.chats(owner(x_telegram_init_data, authorization))
 
     @app.post("/api/chats/{chat_id}/resume")
-    async def resume(chat_id: int, x_telegram_init_data: str | None = Header(None)):
-        owner_id = owner(x_telegram_init_data)
+    async def resume(chat_id: int, x_telegram_init_data: str | None = Header(None),
+                    authorization: str | None = Header(None)):
+        owner_id = owner(x_telegram_init_data, authorization)
         service.resume(owner_id, chat_id)
         return service.chats(owner_id)
 
     @app.post("/api/playground")
-    async def playground(body: Playground, x_telegram_init_data: str | None = Header(None)):
+    async def playground(body: Playground, x_telegram_init_data: str | None = Header(None),
+                    authorization: str | None = Header(None)):
         messages = [{"from": m.from_, "text": m.text} for m in body.messages]
-        return await service.playground(owner(x_telegram_init_data), messages)
+        return await service.playground(owner(x_telegram_init_data, authorization), messages)
 
     @app.post("/api/billing/invoice")
-    async def invoice(x_telegram_init_data: str | None = Header(None)):
+    async def invoice(x_telegram_init_data: str | None = Header(None),
+                    authorization: str | None = Header(None)):
         try:
-            return await service.plan_invoice(owner(x_telegram_init_data))
+            return await service.plan_invoice(owner(x_telegram_init_data, authorization))
         except TelegramError as exc:
             log.error("Fatura oluşturulamadı: %s", exc.description)
             raise HTTPException(502, "Ödeme bağlantısı oluşturulamadı, biraz sonra tekrar dene.") from None
@@ -133,7 +175,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None, api
         return {"ok": True}
 
     @app.get("/")
-    async def index():
+    async def site():
+        return FileResponse(WEBAPP_DIR / "site.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/app")
+    @app.get("/panel")
+    async def panel():
         return FileResponse(WEBAPP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=WEBAPP_DIR), name="static")

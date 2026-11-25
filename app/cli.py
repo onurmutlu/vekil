@@ -35,7 +35,7 @@ async def setup(settings: Settings) -> None:
         await api("setWebhook", url=f"{settings.webapp_url}/telegram/webhook", secret_token=settings.webhook_secret,
                   allowed_updates=UPDATES)
         await api("setChatMenuButton", menu_button={"type": "web_app", "text": "Panel",
-                                                    "web_app": {"url": settings.webapp_url}})
+                                                    "web_app": {"url": settings.webapp_url + "/app"}})
         await api("setMyCommands", commands=COMMANDS)
         print(f"@{me['username']} hazır: webhook, Panel butonu ve komutlar ayarlandı.")
     finally:

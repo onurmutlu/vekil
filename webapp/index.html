@@ -101,11 +101,18 @@
       </article>
     </section>
 
-    <div id="outside" class="empty" hidden>Bu panel Telegram içinden, bot üzerinden açılmalı.</div>
+    <section id="login" class="card login" hidden>
+      <h2>Panele giriş</h2>
+      <p class="muted">Vekil, Telegram hesabınla çalışır. Şifre yok: Telegram ile giriş yap, işletme bilgilerini gir, asistanı aç.</p>
+      <div id="login-widget" class="login-widget"></div>
+      <p class="muted small" id="login-note"></p>
+      <a class="link small" href="/">← Vekil nedir?</a>
+    </section>
   </main>
 
   <footer class="foot">
     <button class="link" id="support">Destek</button><span aria-hidden="true">·</span><button class="link" id="terms">Koşullar</button>
+    <span aria-hidden="true" class="web-only" hidden>·</span><button class="link web-only" id="logout" hidden>Çıkış</button>
   </footer>
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="/static/app.js"></script>

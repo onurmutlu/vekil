@@ -12,13 +12,34 @@
 
   let state = null;
   let thread = [];
+  const inTelegram = Boolean(tg && tg.initData);
+  const TOKEN_KEY = "vekil.session";
+
+  // Browser storage can be missing or blocked: never let that break the panel.
+  const storage = {
+    get() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (_) { return ""; } },
+    set(v) { try { localStorage.setItem(TOKEN_KEY, v); } catch (_) { /* session only for this page */ } },
+    clear() { try { localStorage.removeItem(TOKEN_KEY); } catch (_) { /* ignore */ } },
+  };
+  let session = storage.get();
+
+  function authHeaders() {
+    if (inTelegram) return { "X-Telegram-Init-Data": tg.initData };
+    return session ? { Authorization: `Bearer ${session}` } : {};
+  }
 
   async function api(path, options = {}) {
     const response = await fetch(path, {
       ...options,
-      headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": tg ? tg.initData : "" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
     });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 401 && !inTelegram && path !== "/api/auth/telegram") {
+      session = "";
+      storage.clear();
+      showLogin(body.detail);
+      throw new Error(body.detail || "Giriş yapman gerekiyor.");
+    }
     if (!response.ok) {
       const detail = Array.isArray(body.detail) ? "Girilen değerleri kontrol et." : body.detail;
       throw new Error(detail || "Bir şeyler ters gitti. Tekrar dene.");
@@ -34,7 +55,8 @@
     toast.timer = setTimeout(() => { node.hidden = true; }, 3200);
   }
 
-  const haptic = (kind) => tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(kind);
+  const haptic = (kind) => inTelegram && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(kind);
+  const alertBox = (text) => (inTelegram ? tg.showAlert(text) : window.alert(text));
 
   function show(view) {
     for (const name of ["setup", "try", "chats", "plan"]) $(`view-${name}`).hidden = name !== view;
@@ -193,18 +215,29 @@
 
   async function buy() {
     $("buy").disabled = true;
+    const waitForPlan = async (tries) => {
+      for (let i = 0; i < tries; i += 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const next = await api("/api/me").catch(() => null);
+        if (next && next.quota.plan === "paid") { render(next); toast("Planın aktif ⭐"); return; }
+      }
+    };
     try {
       const { invoice_link: link } = await api("/api/billing/invoice", { method: "POST" });
+      if (!inTelegram) {
+        // On the web the Stars invoice opens in the Telegram app; we watch for the payment here.
+        window.open(link, "_blank", "noopener");
+        $("buy").disabled = false;
+        toast("Ödemeyi Telegram'da tamamla, bu sayfa kendini güncelleyecek.");
+        waitForPlan(60);
+        return;
+      }
       tg.openInvoice(link, async (status) => {
         $("buy").disabled = false;
         if (status === "paid") {
           haptic("success");
           toast("Teşekkürler! Planın birkaç saniye içinde aktif olacak.");
-          for (let i = 0; i < 8; i += 1) {
-            await new Promise((r) => setTimeout(r, 1500));
-            const next = await api("/api/me").catch(() => null);
-            if (next && next.quota.plan === "paid") { render(next); return; }
-          }
+          waitForPlan(8);
         } else if (status === "failed") {
           toast("Ödeme tamamlanamadı.");
         }
@@ -215,31 +248,79 @@
     }
   }
 
-  // ------------------------------------------------------------ boot
-  async function boot() {
-    if (!tg || !tg.initData) {
-      document.querySelectorAll(".view").forEach((v) => { v.hidden = true; });
-      $("outside").hidden = false;
-      $("status-line").textContent = "";
-      return;
+  // ------------------------------------------------------------ web login
+  function showLogin(note) {
+    document.querySelectorAll(".view").forEach((v) => { v.hidden = true; });
+    document.querySelector(".tabs").hidden = true;
+    $("active").parentElement.hidden = true;
+    $("status-line").textContent = "Giriş yap";
+    $("login").hidden = false;
+    $("login-note").textContent = note || "";
+    if ($("login-widget").childElementCount) return;
+    fetch("/api/public").then((r) => r.json()).then((cfg) => {
+      if (!cfg.bot_username) {
+        $("login-note").textContent = "Giriş henüz yapılandırılmadı (BOT_USERNAME).";
+        return;
+      }
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = "https://telegram.org/js/telegram-widget.js?22";
+      script.dataset.telegramLogin = cfg.bot_username;
+      script.dataset.size = "large";
+      script.dataset.radius = "10";
+      script.dataset.requestAccess = "write";  // lets the bot send hand-off notifications
+      script.dataset.onauth = "vekilAuth(user)";
+      $("login-widget").append(script);
+    }).catch(() => { $("login-note").textContent = "Giriş yüklenemedi, sayfayı yenile."; });
+  }
+
+  window.vekilAuth = async (user) => {
+    try {
+      const { token } = await api("/api/auth/telegram", { method: "POST", body: JSON.stringify(user) });
+      session = token;
+      storage.set(token);
+      document.querySelectorAll(".web-only").forEach((n) => { n.hidden = false; });
+      $("login").hidden = true;
+      document.querySelector(".tabs").hidden = false;
+      $("active").parentElement.hidden = false;
+      show("setup");
+      await start();
+    } catch (error) {
+      $("login-note").textContent = error.message;
     }
-    tg.ready();
-    tg.expand();
+  };
+
+  // ------------------------------------------------------------ boot
+  async function start() {
+    renderThread();
+    try {
+      render(await api("/api/me"));
+      loadChats();
+    } catch (error) {
+      if (inTelegram) $("status-line").textContent = error.message;
+    }
+  }
+
+  function boot() {
     document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => show(tab.dataset.tab)));
     $("profile").addEventListener("submit", saveProfile);
     $("active").addEventListener("change", toggleActive);
     $("try-form").addEventListener("submit", sendTry);
     $("try-reset").addEventListener("click", () => { thread = []; renderThread(); });
     $("buy").addEventListener("click", buy);
-    $("support").addEventListener("click", () => state && tg.showAlert(state.support || "Destek bilgisi yok."));
-    $("terms").addEventListener("click", () => state && tg.showAlert(state.terms || "Koşullar tanımlanmadı."));
-    renderThread();
-    try {
-      render(await api("/api/me"));
-      loadChats();
-    } catch (error) {
-      $("status-line").textContent = error.message;
+    $("support").addEventListener("click", () => alertBox((state && state.support) || "Destek bilgisi yok."));
+    $("terms").addEventListener("click", () => alertBox((state && state.terms) || "Koşullar tanımlanmadı."));
+
+    if (inTelegram) {
+      tg.ready();
+      tg.expand();
+      start();
+      return;
     }
+    document.body.classList.add("web");
+    if (session) document.querySelectorAll(".web-only").forEach((n) => { n.hidden = false; });
+    $("logout").addEventListener("click", () => { session = ""; storage.clear(); window.location.reload(); });
+    if (session) start(); else showLogin();
   }
 
   boot();
