@@ -1,0 +1,13 @@
+# Cloudflare Tunnel: sunucuda port açmadan HTTPS ile yayın.
+# Cloudflare Zero Trust > Networks > Tunnels > Create tunnel > token'ı .env içine TUNNEL_TOKEN olarak koy.
+# Tunnel'ın Public Hostname'i: alt alan adı -> http://vekil:8000
+services:
+  vekil:
+    ports: !reset []
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN .env içinde olmalı}
+    depends_on: [vekil]
+    restart: unless-stopped
