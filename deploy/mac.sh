@@ -295,8 +295,20 @@ plist() { # label workdir logname args...
   <key>StandardErrorPath</key><string>$BASE/logs/$log.log</string>
 </dict></plist>
 PL
+  # bootout asenkron: eski servis tamamen inmeden bootstrap "5: Input/output error" verir
   launchctl bootout "gui/$UIDN/$label" 2>/dev/null || true
-  launchctl bootstrap "gui/$UIDN" "$AGENTS/$label.plist"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    launchctl print "gui/$UIDN/$label" >/dev/null 2>&1 || break
+    sleep 1
+  done
+  for _ in 1 2 3; do
+    launchctl bootstrap "gui/$UIDN" "$AGENTS/$label.plist" 2>/dev/null && return 0
+    sleep 2
+  done
+  if launchctl print "gui/$UIDN/$label" >/dev/null 2>&1; then
+    launchctl kickstart -k "gui/$UIDN/$label" && return 0
+  fi
+  warn "$label başlatılamadı. Elle: launchctl bootstrap gui/$UIDN $AGENTS/$label.plist"
 }
 say "Servisler başlatılıyor (bilgisayar açıldığında otomatik başlar)"
 if [ "$INSTALL_VEKIL" = 1 ]; then
