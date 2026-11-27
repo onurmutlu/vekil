@@ -1,0 +1,23 @@
+{
+  "name": "SoruPilot",
+  "buildCommand": "npm run build",
+  "framework": "other",
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://sorupilot-api.example.com/api/$1"
+    },
+    {
+      "source": "/app/(.*)",
+      "destination": "/app/index.html"
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_API_URL": "https://sorupilot-api.example.com"
+  }
+}
