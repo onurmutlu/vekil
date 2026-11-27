@@ -65,7 +65,12 @@ fi
 # ------------------------------------------------------------------ kod
 fetch() { # repo dir
   if [ -d "$BASE/$2/.git" ]; then
-    git -C "$BASE/$2" pull --ff-only -q && ok "$2 güncellendi"
+    # .env, products.json, data/ git dışında; izlenen dosyalardaki yerel değişiklikler kenara alınır
+    git -C "$BASE/$2" fetch -q origin main || die "$2 indirilemedi (internet/GitHub?)"
+    if ! git -C "$BASE/$2" diff --quiet HEAD 2>/dev/null; then
+      git -C "$BASE/$2" stash -q && warn "$2: yerel değişiklikler 'git stash' ile kenara alındı"
+    fi
+    git -C "$BASE/$2" checkout -q -B main origin/main && ok "$2 güncellendi ($(git -C "$BASE/$2" log -1 --format=%h))"
   else
     git clone -q "https://github.com/onurmutlu/$1" "$BASE/$2" && ok "$2 indirildi"
   fi
@@ -90,6 +95,7 @@ venv() { # dir
 say "Python ortamları hazırlanıyor"
 [ "$INSTALL_VEKIL" = 1 ] && venv vekil
 venv stars
+[ -f "$BASE/stars/app/hubcli.py" ] || die "stars kodu eski (app/hubcli.py yok): cd $BASE/stars && git status"
 say "Kurumsal site derleniyor"
 ( cd "$BASE/site" && npm install --no-audit --no-fund --silent && npm run build --silent ) >/dev/null
 [ -f "$BASE/site/dist/index.html" ] && ok "siyahkare.com derlendi" || die "Site derlenemedi: cd $BASE/site && npm run build"
@@ -197,9 +203,6 @@ if [ "$INSTALL_HUB" = 1 ] && [ ! -f "$HENV_FILE" ]; then
   cp "$BASE/stars/hub.env.example" "$HENV_FILE"
   set_kv "$HENV_FILE" HUB_BOT_TOKEN "$(ask_secret 'Hub bot token (görünmez)')"
   set_kv "$HENV_FILE" HUB_BOT_USERNAME "$(ask 'Hub bot kullanıcı adı (@ olmadan)')"
-  KEYS="$("$BASE/stars/.venv/bin/python" -m app.hubcli keys)"
-  set_kv "$HENV_FILE" HUB_MASTER_KEY "$(printf '%s\n' "$KEYS" | sed -n 's/^HUB_MASTER_KEY=//p')"
-  set_kv "$HENV_FILE" HUB_WEBHOOK_SECRET "$(printf '%s\n' "$KEYS" | sed -n 's/^HUB_WEBHOOK_SECRET=//p')"
   set_kv "$HENV_FILE" HUB_DATA_DIR "$BASE/stars/data/hub"
   ADMINS="$(get_kv "$SENV_FILE" ADMIN_IDS)"
   [ -n "$ADMINS" ] && set_kv "$HENV_FILE" HUB_ADMIN_IDS "$ADMINS"
@@ -209,7 +212,17 @@ if [ "$INSTALL_HUB" = 1 ] && [ ! -f "$HENV_FILE" ]; then
   ok "Hub .env.hub oluşturuldu"
   warn "HUB_MASTER_KEY bağlı botların token'larını şifreler. $HENV_FILE dosyasını yedekle."
 fi
-[ "$INSTALL_HUB" = 1 ] && set_kv "$HENV_FILE" HUB_BASE_URL "https://$HUB_HOST"
+if [ "$INSTALL_HUB" = 1 ]; then
+  [ -n "$(get_kv "$HENV_FILE" HUB_BOT_TOKEN)" ] || set_kv "$HENV_FILE" HUB_BOT_TOKEN "$(ask_secret 'Hub bot token (görünmez)')"
+  [ -n "$(get_kv "$HENV_FILE" HUB_BOT_USERNAME)" ] || set_kv "$HENV_FILE" HUB_BOT_USERNAME "$(ask 'Hub bot kullanıcı adı (@ olmadan)')"
+  if [ -z "$(get_kv "$HENV_FILE" HUB_MASTER_KEY)" ]; then
+    KEYS="$(cd "$BASE/stars" && .venv/bin/python -m app.hubcli keys)" || die "Hub anahtarları üretilemedi"
+    set_kv "$HENV_FILE" HUB_MASTER_KEY "$(printf '%s\n' "$KEYS" | sed -n 's/^HUB_MASTER_KEY=//p')"
+    set_kv "$HENV_FILE" HUB_WEBHOOK_SECRET "$(printf '%s\n' "$KEYS" | sed -n 's/^HUB_WEBHOOK_SECRET=//p')"
+    ok "Hub anahtarları üretildi"
+  fi
+  set_kv "$HENV_FILE" HUB_BASE_URL "https://$HUB_HOST"
+fi
 
 # ------------------------------------------------------------------ cloudflare tunnel
 say "Cloudflare Tunnel"
