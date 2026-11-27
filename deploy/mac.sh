@@ -222,6 +222,16 @@ if [ "$INSTALL_HUB" = 1 ]; then
     ok "Hub anahtarları üretildi"
   fi
   set_kv "$HENV_FILE" HUB_BASE_URL "https://$HUB_HOST"
+  # lisans fiyatı: 1000 ⭐ / 30 gün (eski kurulumlar 500 ile gelmişti)
+  case "$(get_kv "$HENV_FILE" HUB_PRO_STARS)" in ""|500) set_kv "$HENV_FILE" HUB_PRO_STARS 1000 ;; esac
+  # Stars demo mağazası: yöneticiye panel linki, herkese lisans satın alma linki
+  HUB_USER="$(get_kv "$HENV_FILE" HUB_BOT_USERNAME | tr -d '@')"
+  if [ -n "$HUB_USER" ]; then
+    set_kv "$SENV_FILE" ADMIN_URL "https://t.me/$HUB_USER?start=panel"
+    set_kv "$SENV_FILE" BUY_URL "https://t.me/$HUB_USER?start=lisans"
+    set_kv "$SENV_FILE" BUY_TEXT "Sen de Stars mağazası aç · ⭐$(get_kv "$HENV_FILE" HUB_PRO_STARS)/30 gün"
+    ok "Mağazaya yönetim ve lisans linkleri eklendi (@$HUB_USER)"
+  fi
 fi
 
 # ------------------------------------------------------------------ cloudflare tunnel
