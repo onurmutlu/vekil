@@ -2,6 +2,7 @@
 # SiyahKare uygulamalarını bu Mac'te çalıştırır ve Cloudflare Tunnel ile yayınlar:
 #   https://vekil.siyahkare.com  (Vekil)
 #   https://stars.siyahkare.com  (Stars satış sitesi + demo mağaza)
+#   https://siyahkare.com        (kurumsal site, SiyahKare/SK2026)
 #
 # Kullanım:  bash deploy/mac.sh
 # Tekrar çalıştırmak güvenlidir: kodu günceller, ayarları korur, servisleri yeniden başlatır.
@@ -11,6 +12,8 @@ BASE="$HOME/siyahkare-apps"
 TUNNEL_NAME="siyahkare-apps"
 VEKIL_HOST="vekil.siyahkare.com"; VEKIL_PORT=8701
 STARS_HOST="stars.siyahkare.com"; STARS_PORT=8702
+SITE_HOST="siyahkare.com"; SITE_WWW="www.siyahkare.com"; SITE_PORT=8703
+SITE_BRANCH="siyahkare-com-yayin"   # birleştirilince main'e düşer
 AGENTS="$HOME/Library/LaunchAgents"
 UIDN="$(id -u)"
 
@@ -26,6 +29,7 @@ say "Araçlar kontrol ediliyor"
 command -v brew >/dev/null || die "Homebrew gerekli: https://brew.sh"
 command -v git >/dev/null || brew install git
 command -v cloudflared >/dev/null || brew install cloudflared
+command -v npm >/dev/null || brew install node
 PY=""
 for c in python3.13 python3.12 python3.11 python3.10 /opt/homebrew/bin/python3 python3; do
   if command -v "$c" >/dev/null && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
@@ -49,6 +53,13 @@ fetch() { # repo dir
 say "Kod indiriliyor ($BASE)"
 fetch vekil vekil
 fetch stars stars
+if [ -d "$BASE/site/.git" ]; then
+  git -C "$BASE/site" pull --ff-only -q && ok "site güncellendi"
+else
+  git clone -q -b "$SITE_BRANCH" https://github.com/SiyahKare/SK2026 "$BASE/site" 2>/dev/null \
+    || git clone -q https://github.com/SiyahKare/SK2026 "$BASE/site"
+  ok "site indirildi ($(git -C "$BASE/site" branch --show-current))"
+fi
 
 venv() { # dir
   [ -x "$BASE/$1/.venv/bin/python" ] || "$PY" -m venv "$BASE/$1/.venv"
@@ -59,6 +70,9 @@ venv() { # dir
 say "Python ortamları hazırlanıyor"
 venv vekil
 venv stars
+say "Kurumsal site derleniyor"
+( cd "$BASE/site" && npm install --no-audit --no-fund --silent && npm run build --silent ) >/dev/null
+[ -f "$BASE/site/dist/index.html" ] && ok "siyahkare.com derlendi" || die "Site derlenemedi: cd $BASE/site && npm run build"
 
 # ------------------------------------------------------------------ ayarlar
 set_kv() { # file key value  (değerleri ekrana yazmadan .env'e işler)
@@ -175,7 +189,7 @@ fi
 CREDS="$HOME/.cloudflared/$TUNNEL_ID.json"
 [ -f "$CREDS" ] || die "Tunnel kimlik dosyası yok: $CREDS. 'cloudflared tunnel delete $TUNNEL_NAME' ile silip betiği tekrar çalıştır."
 
-for host in "$VEKIL_HOST" "$STARS_HOST"; do
+for host in "$VEKIL_HOST" "$STARS_HOST" "$SITE_HOST" "$SITE_WWW"; do
   if cloudflared tunnel route dns "$TUNNEL_NAME" "$host" >/dev/null 2>&1; then
     ok "DNS: $host → $TUNNEL_NAME"
   else
@@ -192,6 +206,10 @@ ingress:
     service: http://127.0.0.1:$VEKIL_PORT
   - hostname: $STARS_HOST
     service: http://127.0.0.1:$STARS_PORT
+  - hostname: $SITE_HOST
+    service: http://127.0.0.1:$SITE_PORT
+  - hostname: $SITE_WWW
+    service: http://127.0.0.1:$SITE_PORT
   - service: http_status:404
 YML
 cloudflared tunnel --config "$BASE/cloudflared.yml" ingress validate >/dev/null && ok "Tunnel ayarı geçerli"
@@ -222,6 +240,8 @@ plist com.siyahkare.vekil "$BASE/vekil" vekil \
   "$BASE/vekil/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$VEKIL_PORT" --env-file "$VENV_FILE" --proxy-headers
 plist com.siyahkare.stars "$BASE/stars" stars \
   "$BASE/stars/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$STARS_PORT" --env-file "$SENV_FILE" --proxy-headers
+plist com.siyahkare.site "$BASE/site/dist" site \
+  "$PY" -m http.server "$SITE_PORT" --bind 127.0.0.1 --directory "$BASE/site/dist"
 plist com.siyahkare.tunnel "$BASE" tunnel \
   "$(command -v cloudflared)" tunnel --no-autoupdate --config "$BASE/cloudflared.yml" run
 
@@ -234,11 +254,13 @@ wait_ok() { # url name
 }
 wait_ok "http://127.0.0.1:$VEKIL_PORT/health" "Vekil (yerel)" || tail -20 "$BASE/logs/vekil.log"
 wait_ok "http://127.0.0.1:$STARS_PORT/health" "Stars (yerel)" || tail -20 "$BASE/logs/stars.log"
+wait_ok "http://127.0.0.1:$SITE_PORT/" "siyahkare.com (yerel)" || tail -20 "$BASE/logs/site.log"
 
 say "İnternetten erişim kontrolü (DNS yayılması 1-2 dakika sürebilir)"
 PUBLIC_OK=1
 wait_ok "https://$VEKIL_HOST/health" "https://$VEKIL_HOST" || PUBLIC_OK=0
 wait_ok "https://$STARS_HOST/health" "https://$STARS_HOST" || PUBLIC_OK=0
+wait_ok "https://$SITE_HOST/" "https://$SITE_HOST" || PUBLIC_OK=0
 
 # ------------------------------------------------------------------ telegram
 say "Telegram botları bağlanıyor"
@@ -260,6 +282,7 @@ fi
 say "Bitti"
 echo "  Vekil:  https://$VEKIL_HOST   (panel: /app)"
 echo "  Stars:  https://$STARS_HOST   (demo mağaza: /app)"
+echo "  Site:   https://$SITE_HOST"
 [ "$PUBLIC_OK" = 1 ] || warn "Siteler henüz dışarıdan açılmadı; birkaç dakika sonra tekrar dene."
 cat <<TXT
 
