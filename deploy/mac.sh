@@ -325,6 +325,10 @@ if [ "$INSTALL_VEKIL" = 1 ]; then
   plist com.siyahkare.vekil "$BASE/vekil" vekil \
     "$BASE/vekil/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$VEKIL_PORT" --env-file "$VENV_FILE" --proxy-headers
 fi
+# eski sürümler bot token'larını loga yazıyordu: o logları temizle
+for f in "$BASE"/logs/*.log; do
+  [ -f "$f" ] && grep -q "api.telegram.org/bot" "$f" && : > "$f" && warn "$(basename "$f") token içerdiği için temizlendi"
+done
 plist com.siyahkare.stars "$BASE/stars" stars \
   "$BASE/stars/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$STARS_PORT" --env-file "$SENV_FILE" --proxy-headers
 if [ "$INSTALL_HUB" = 1 ]; then
