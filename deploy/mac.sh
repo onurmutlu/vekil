@@ -43,6 +43,16 @@ ok "cloudflared: $(cloudflared --version 2>&1 | head -1)"
 
 mkdir -p "$BASE/logs" "$AGENTS"
 
+ask_early() { local v; read -rp "  $1: " v </dev/tty; printf "%s" "$v"; }
+if [ -f "$BASE/vekil/.env" ]; then
+  INSTALL_VEKIL=1
+else
+  say "Kurulum kapsamı"
+  echo "  Stars + kurumsal site: bot token yeter. Vekil ayrıca kendi botunu ve bir AI anahtarı ister."
+  ANS="$(ask_early 'Vekil de şimdi kurulsun mu? [e/H]')"
+  if [[ "$ANS" =~ ^[eEyY] ]]; then INSTALL_VEKIL=1; else INSTALL_VEKIL=0; fi
+fi
+
 # ------------------------------------------------------------------ kod
 fetch() { # repo dir
   if [ -d "$BASE/$2/.git" ]; then
@@ -69,7 +79,7 @@ venv() { # dir
   ok "$1 bağımlılıkları kuruldu"
 }
 say "Python ortamları hazırlanıyor"
-venv vekil
+[ "$INSTALL_VEKIL" = 1 ] && venv vekil
 venv stars
 say "Kurumsal site derleniyor"
 ( cd "$BASE/site" && npm install --no-audit --no-fund --silent && npm run build --silent ) >/dev/null
@@ -110,6 +120,7 @@ if [ ! -f "$VENV_FILE" ] || [ ! -f "$SENV_FILE" ]; then
   esac
 fi
 
+if [ "$INSTALL_VEKIL" = 1 ]; then
 say "Vekil ayarları"
 if [ ! -f "$VENV_FILE" ]; then
   cp "$BASE/vekil/.env.example" "$VENV_FILE"
@@ -132,6 +143,7 @@ else
   ok "Vekil .env mevcut, korunuyor"
 fi
 set_kv "$VENV_FILE" WEBAPP_URL "https://$VEKIL_HOST"
+fi
 
 say "Stars ayarları"
 if [ ! -f "$SENV_FILE" ]; then
@@ -146,7 +158,9 @@ if [ ! -f "$SENV_FILE" ]; then
   set_kv "$SENV_FILE" TERMS_TEXT "Demo ürün: 1 Star karşılığı dijital içerik, ödemeden hemen sonra teslim edilir. İade için /paysupport."
   # Demo mağaza 1 ⭐'lık ürünle satışa açık başlar: sitedeki "Canlı demo" gerçekten çalışsın.
   set_kv "$SENV_FILE" SALES_ENABLED true
-  set_kv "$SENV_FILE" ADMIN_IDS "$(get_kv "$VENV_FILE" ADMIN_IDS)"
+  ADMINS="$(get_kv "$VENV_FILE" ADMIN_IDS)"
+  [ -n "$ADMINS" ] || ADMINS="$(ask 'Senin Telegram kullanıcı ID numaran (iade komutları için; @userinfobot söyler)')"
+  set_kv "$SENV_FILE" ADMIN_IDS "$ADMINS"
   set_kv "$SENV_FILE" SHOP_NAME "SiyahKare Stars Demo"
   set_kv "$SENV_FILE" WEBHOOK_SECRET "$(secret)"
   set_kv "$SENV_FILE" DB_PATH "$BASE/stars/data/shop.sqlite3"
@@ -190,7 +204,8 @@ fi
 CREDS="$HOME/.cloudflared/$TUNNEL_ID.json"
 [ -f "$CREDS" ] || die "Tunnel kimlik dosyası yok: $CREDS. 'cloudflared tunnel delete $TUNNEL_NAME' ile silip betiği tekrar çalıştır."
 
-for host in "$VEKIL_HOST" "$STARS_HOST" "$SITE_HOST"; do
+HOSTS=("$STARS_HOST" "$SITE_HOST"); [ "$INSTALL_VEKIL" = 1 ] && HOSTS=("$VEKIL_HOST" "${HOSTS[@]}")
+for host in "${HOSTS[@]}"; do
   if cloudflared tunnel route dns "$TUNNEL_NAME" "$host" >/dev/null 2>&1; then
     ok "DNS: $host → $TUNNEL_NAME"
   else
@@ -203,8 +218,7 @@ cat > "$BASE/cloudflared.yml" <<YML
 tunnel: $TUNNEL_ID
 credentials-file: $CREDS
 ingress:
-  - hostname: $VEKIL_HOST
-    service: http://127.0.0.1:$VEKIL_PORT
+$( [ "$INSTALL_VEKIL" = 1 ] && printf '  - hostname: %s\n    service: http://127.0.0.1:%s\n' "$VEKIL_HOST" "$VEKIL_PORT" )
   - hostname: $STARS_HOST
     service: http://127.0.0.1:$STARS_PORT
   - hostname: $SITE_HOST
@@ -235,8 +249,10 @@ PL
   launchctl bootstrap "gui/$UIDN" "$AGENTS/$label.plist"
 }
 say "Servisler başlatılıyor (bilgisayar açıldığında otomatik başlar)"
-plist com.siyahkare.vekil "$BASE/vekil" vekil \
-  "$BASE/vekil/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$VEKIL_PORT" --env-file "$VENV_FILE" --proxy-headers
+if [ "$INSTALL_VEKIL" = 1 ]; then
+  plist com.siyahkare.vekil "$BASE/vekil" vekil \
+    "$BASE/vekil/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$VEKIL_PORT" --env-file "$VENV_FILE" --proxy-headers
+fi
 plist com.siyahkare.stars "$BASE/stars" stars \
   "$BASE/stars/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$STARS_PORT" --env-file "$SENV_FILE" --proxy-headers
 plist com.siyahkare.site "$BASE/site/dist" site \
@@ -251,19 +267,20 @@ wait_ok() { # url name
   done
   warn "$2 yanıt vermedi. Log: $BASE/logs/"; return 1
 }
-wait_ok "http://127.0.0.1:$VEKIL_PORT/health" "Vekil (yerel)" || tail -20 "$BASE/logs/vekil.log"
+if [ "$INSTALL_VEKIL" = 1 ]; then wait_ok "http://127.0.0.1:$VEKIL_PORT/health" "Vekil (yerel)" || tail -20 "$BASE/logs/vekil.log"; fi
 wait_ok "http://127.0.0.1:$STARS_PORT/health" "Stars (yerel)" || tail -20 "$BASE/logs/stars.log"
 wait_ok "http://127.0.0.1:$SITE_PORT/" "siyahkare.com (yerel)" || tail -20 "$BASE/logs/site.log"
 
 say "İnternetten erişim kontrolü (DNS yayılması 1-2 dakika sürebilir)"
 PUBLIC_OK=1
-wait_ok "https://$VEKIL_HOST/health" "https://$VEKIL_HOST" || PUBLIC_OK=0
+if [ "$INSTALL_VEKIL" = 1 ]; then wait_ok "https://$VEKIL_HOST/health" "https://$VEKIL_HOST" || PUBLIC_OK=0; fi
 wait_ok "https://$STARS_HOST/health" "https://$STARS_HOST" || PUBLIC_OK=0
 wait_ok "https://$SITE_HOST/" "https://$SITE_HOST" || PUBLIC_OK=0
 
 # ------------------------------------------------------------------ telegram
 say "Telegram botları bağlanıyor"
-for app in vekil stars; do
+APPS=(stars); [ "$INSTALL_VEKIL" = 1 ] && APPS=(vekil stars)
+for app in "${APPS[@]}"; do
   envf="$BASE/$app/.env"
   ( cd "$BASE/$app" && "$BASE/$app/.venv/bin/dotenv" -f "$envf" run -- "$BASE/$app/.venv/bin/python" -m app.cli setup ) \
     && ok "$app botu hazır" || warn "$app botu ayarlanamadı. Sonra: cd $BASE/$app && .venv/bin/dotenv -f .env run -- .venv/bin/python -m app.cli setup"
@@ -279,7 +296,7 @@ if [[ "$ANS" =~ ^[eEyY] ]]; then
 fi
 
 say "Bitti"
-echo "  Vekil:  https://$VEKIL_HOST   (panel: /app)"
+[ "$INSTALL_VEKIL" = 1 ] && echo "  Vekil:  https://$VEKIL_HOST   (panel: /app)"
 echo "  Stars:  https://$STARS_HOST   (demo mağaza: /app)"
 echo "  Site:   https://$SITE_HOST"
 [ "$PUBLIC_OK" = 1 ] || warn "Siteler henüz dışarıdan açılmadı; birkaç dakika sonra tekrar dene."
