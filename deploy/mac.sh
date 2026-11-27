@@ -3,6 +3,7 @@
 #   https://vekil.siyahkare.com  (Vekil)
 #   https://stars.siyahkare.com  (Stars satış sitesi + demo mağaza)
 #   https://site.siyahkare.com   (kurumsal site taslağı, SiyahKare/SK2026)
+#   https://magaza.siyahkare.com (Hub: başka bot sahiplerine kiralık Stars mağazası, isteğe bağlı)
 #   (siyahkare.com ana alan adı Vercel'deki Sanal Devlet portalına bağlı; bu betik ona dokunmaz)
 #
 # Kullanım:  bash deploy/mac.sh
@@ -14,6 +15,7 @@ TUNNEL_NAME="siyahkare-apps"
 VEKIL_HOST="vekil.siyahkare.com"; VEKIL_PORT=8701
 STARS_HOST="stars.siyahkare.com"; STARS_PORT=8702
 SITE_HOST="site.siyahkare.com"; SITE_PORT=8703
+HUB_HOST="magaza.siyahkare.com"; HUB_PORT=8704
 SITE_BRANCH="siyahkare-com-yayin"   # birleştirilince main'e düşer
 AGENTS="$HOME/Library/LaunchAgents"
 UIDN="$(id -u)"
@@ -51,6 +53,13 @@ else
   echo "  Stars + kurumsal site: bot token yeter. Vekil ayrıca kendi botunu ve bir AI anahtarı ister."
   ANS="$(ask_early 'Vekil de şimdi kurulsun mu? [e/H]')"
   if [[ "$ANS" =~ ^[eEyY] ]]; then INSTALL_VEKIL=1; else INSTALL_VEKIL=0; fi
+fi
+if [ -f "$BASE/stars/.env.hub" ]; then
+  INSTALL_HUB=1
+else
+  echo "  Hub: başka bot sahiplerine Stars mağazası kiraladığın panel ($HUB_HOST). Ayrı bir platform botu ister."
+  ANS="$(ask_early 'Hub da şimdi kurulsun mu? [e/H]')"
+  if [[ "$ANS" =~ ^[eEyY] ]]; then INSTALL_HUB=1; else INSTALL_HUB=0; fi
 fi
 
 # ------------------------------------------------------------------ kod
@@ -181,6 +190,27 @@ JSON
   ok "Demo ürün eklendi (1 ⭐)"
 fi
 
+HENV_FILE="$BASE/stars/.env.hub"
+if [ "$INSTALL_HUB" = 1 ] && [ ! -f "$HENV_FILE" ]; then
+  say "Hub ayarları"
+  echo "  @BotFather'da Hub için ayrı bir platform botu oluştur (satıcılar paneli bu bottan açar)."
+  cp "$BASE/stars/hub.env.example" "$HENV_FILE"
+  set_kv "$HENV_FILE" HUB_BOT_TOKEN "$(ask_secret 'Hub bot token (görünmez)')"
+  set_kv "$HENV_FILE" HUB_BOT_USERNAME "$(ask 'Hub bot kullanıcı adı (@ olmadan)')"
+  KEYS="$("$BASE/stars/.venv/bin/python" -m app.hubcli keys)"
+  set_kv "$HENV_FILE" HUB_MASTER_KEY "$(printf '%s\n' "$KEYS" | sed -n 's/^HUB_MASTER_KEY=//p')"
+  set_kv "$HENV_FILE" HUB_WEBHOOK_SECRET "$(printf '%s\n' "$KEYS" | sed -n 's/^HUB_WEBHOOK_SECRET=//p')"
+  set_kv "$HENV_FILE" HUB_DATA_DIR "$BASE/stars/data/hub"
+  ADMINS="$(get_kv "$SENV_FILE" ADMIN_IDS)"
+  [ -n "$ADMINS" ] && set_kv "$HENV_FILE" HUB_ADMIN_IDS "$ADMINS"
+  CONTACT_NOW="${CONTACT:-$(get_kv "$SENV_FILE" CONTACT_URL)}"
+  [ -n "$CONTACT_NOW" ] && set_kv "$HENV_FILE" HUB_SUPPORT_TEXT "Plan ve ödeme desteği: $CONTACT_NOW"
+  chmod 600 "$HENV_FILE"
+  ok "Hub .env.hub oluşturuldu"
+  warn "HUB_MASTER_KEY bağlı botların token'larını şifreler. $HENV_FILE dosyasını yedekle."
+fi
+[ "$INSTALL_HUB" = 1 ] && set_kv "$HENV_FILE" HUB_BASE_URL "https://$HUB_HOST"
+
 # ------------------------------------------------------------------ cloudflare tunnel
 say "Cloudflare Tunnel"
 if [ ! -f "$HOME/.cloudflared/cert.pem" ]; then
@@ -205,12 +235,18 @@ CREDS="$HOME/.cloudflared/$TUNNEL_ID.json"
 [ -f "$CREDS" ] || die "Tunnel kimlik dosyası yok: $CREDS. 'cloudflared tunnel delete $TUNNEL_NAME' ile silip betiği tekrar çalıştır."
 
 HOSTS=("$STARS_HOST" "$SITE_HOST"); [ "$INSTALL_VEKIL" = 1 ] && HOSTS=("$VEKIL_HOST" "${HOSTS[@]}")
+[ "$INSTALL_HUB" = 1 ] && HOSTS+=("$HUB_HOST")
 for host in "${HOSTS[@]}"; do
   if cloudflared tunnel route dns "$TUNNEL_NAME" "$host" >/dev/null 2>&1; then
     ok "DNS: $host → $TUNNEL_NAME"
+    continue
+  fi
+  warn "$host için zaten başka bir DNS kaydı var (örneğin GitHub Pages ya da eski bir sunucu)."
+  ANS="$(ask "$host bu Mac'teki tunnel'a yönlendirilsin mi? Eski kayıt değişir. [e/H]")"
+  if [[ "$ANS" =~ ^[eEyY] ]] && cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$host" >/dev/null 2>&1; then
+    ok "DNS: $host → $TUNNEL_NAME (eski kayıt değiştirildi)"
   else
-    warn "$host için DNS kaydı eklenemedi (büyük ihtimalle zaten bir kayıt var)."
-    warn "Cloudflare DNS'te $host kaydını sil ya da CNAME olarak $TUNNEL_ID.cfargotunnel.com yap, sonra betiği tekrar çalıştır."
+    warn "$host değiştirilmedi; o adres tunnel'a gelmeyecek."
   fi
 done
 
@@ -223,6 +259,7 @@ $( [ "$INSTALL_VEKIL" = 1 ] && printf '  - hostname: %s\n    service: http://127
     service: http://127.0.0.1:$STARS_PORT
   - hostname: $SITE_HOST
     service: http://127.0.0.1:$SITE_PORT
+$( [ "$INSTALL_HUB" = 1 ] && printf '  - hostname: %s\n    service: http://127.0.0.1:%s\n' "$HUB_HOST" "$HUB_PORT" )
   - service: http_status:404
 YML
 cloudflared tunnel --config "$BASE/cloudflared.yml" ingress validate >/dev/null && ok "Tunnel ayarı geçerli"
@@ -255,6 +292,10 @@ if [ "$INSTALL_VEKIL" = 1 ]; then
 fi
 plist com.siyahkare.stars "$BASE/stars" stars \
   "$BASE/stars/.venv/bin/uvicorn" app.main:app --factory --host 127.0.0.1 --port "$STARS_PORT" --env-file "$SENV_FILE" --proxy-headers
+if [ "$INSTALL_HUB" = 1 ]; then
+  plist com.siyahkare.hub "$BASE/stars" hub \
+    "$BASE/stars/.venv/bin/uvicorn" app.hub:app --factory --host 127.0.0.1 --port "$HUB_PORT" --env-file "$HENV_FILE" --proxy-headers
+fi
 plist com.siyahkare.site "$BASE/site/dist" site \
   "$PY" -m http.server "$SITE_PORT" --bind 127.0.0.1 --directory "$BASE/site/dist"
 plist com.siyahkare.tunnel "$BASE" tunnel \
@@ -269,13 +310,15 @@ wait_ok() { # url name
 }
 if [ "$INSTALL_VEKIL" = 1 ]; then wait_ok "http://127.0.0.1:$VEKIL_PORT/health" "Vekil (yerel)" || tail -20 "$BASE/logs/vekil.log"; fi
 wait_ok "http://127.0.0.1:$STARS_PORT/health" "Stars (yerel)" || tail -20 "$BASE/logs/stars.log"
-wait_ok "http://127.0.0.1:$SITE_PORT/" "siyahkare.com (yerel)" || tail -20 "$BASE/logs/site.log"
+wait_ok "http://127.0.0.1:$SITE_PORT/" "site (yerel)" || tail -20 "$BASE/logs/site.log"
+if [ "$INSTALL_HUB" = 1 ]; then wait_ok "http://127.0.0.1:$HUB_PORT/panel" "Hub (yerel)" || tail -20 "$BASE/logs/hub.log"; fi
 
 say "İnternetten erişim kontrolü (DNS yayılması 1-2 dakika sürebilir)"
 PUBLIC_OK=1
 if [ "$INSTALL_VEKIL" = 1 ]; then wait_ok "https://$VEKIL_HOST/health" "https://$VEKIL_HOST" || PUBLIC_OK=0; fi
 wait_ok "https://$STARS_HOST/health" "https://$STARS_HOST" || PUBLIC_OK=0
 wait_ok "https://$SITE_HOST/" "https://$SITE_HOST" || PUBLIC_OK=0
+if [ "$INSTALL_HUB" = 1 ]; then wait_ok "https://$HUB_HOST/panel" "https://$HUB_HOST" || PUBLIC_OK=0; fi
 
 # ------------------------------------------------------------------ telegram
 say "Telegram botları bağlanıyor"
@@ -285,6 +328,11 @@ for app in "${APPS[@]}"; do
   ( cd "$BASE/$app" && "$BASE/$app/.venv/bin/dotenv" -f "$envf" run -- "$BASE/$app/.venv/bin/python" -m app.cli setup ) \
     && ok "$app botu hazır" || warn "$app botu ayarlanamadı. Sonra: cd $BASE/$app && .venv/bin/dotenv -f .env run -- .venv/bin/python -m app.cli setup"
 done
+
+if [ "$INSTALL_HUB" = 1 ]; then
+  ( cd "$BASE/stars" && "$BASE/stars/.venv/bin/dotenv" -f "$HENV_FILE" run -- "$BASE/stars/.venv/bin/python" -m app.hubcli setup ) \
+    && ok "Hub botu hazır" || warn "Hub botu ayarlanamadı. Sonra: cd $BASE/stars && .venv/bin/dotenv -f .env.hub run -- .venv/bin/python -m app.hubcli setup"
+fi
 
 # ------------------------------------------------------------------ uyku
 say "Uyku ayarı"
@@ -299,6 +347,7 @@ say "Bitti"
 [ "$INSTALL_VEKIL" = 1 ] && echo "  Vekil:  https://$VEKIL_HOST   (panel: /app)"
 echo "  Stars:  https://$STARS_HOST   (demo mağaza: /app)"
 echo "  Site:   https://$SITE_HOST"
+[ "$INSTALL_HUB" = 1 ] && echo "  Hub:    https://$HUB_HOST/panel   (kiralık mağaza paneli)"
 [ "$PUBLIC_OK" = 1 ] || warn "Siteler henüz dışarıdan açılmadı; birkaç dakika sonra tekrar dene."
 cat <<TXT
 
