@@ -2,7 +2,8 @@
 # SiyahKare uygulamalarını bu Mac'te çalıştırır ve Cloudflare Tunnel ile yayınlar:
 #   https://vekil.siyahkare.com  (Vekil)
 #   https://stars.siyahkare.com  (Stars satış sitesi + demo mağaza)
-#   https://siyahkare.com        (kurumsal site, SiyahKare/SK2026)
+#   https://site.siyahkare.com   (kurumsal site taslağı, SiyahKare/SK2026)
+#   (siyahkare.com ana alan adı Vercel'deki Sanal Devlet portalına bağlı; bu betik ona dokunmaz)
 #
 # Kullanım:  bash deploy/mac.sh
 # Tekrar çalıştırmak güvenlidir: kodu günceller, ayarları korur, servisleri yeniden başlatır.
@@ -12,7 +13,7 @@ BASE="$HOME/siyahkare-apps"
 TUNNEL_NAME="siyahkare-apps"
 VEKIL_HOST="vekil.siyahkare.com"; VEKIL_PORT=8701
 STARS_HOST="stars.siyahkare.com"; STARS_PORT=8702
-SITE_HOST="siyahkare.com"; SITE_WWW="www.siyahkare.com"; SITE_PORT=8703
+SITE_HOST="site.siyahkare.com"; SITE_PORT=8703
 SITE_BRANCH="siyahkare-com-yayin"   # birleştirilince main'e düşer
 AGENTS="$HOME/Library/LaunchAgents"
 UIDN="$(id -u)"
@@ -189,7 +190,7 @@ fi
 CREDS="$HOME/.cloudflared/$TUNNEL_ID.json"
 [ -f "$CREDS" ] || die "Tunnel kimlik dosyası yok: $CREDS. 'cloudflared tunnel delete $TUNNEL_NAME' ile silip betiği tekrar çalıştır."
 
-for host in "$VEKIL_HOST" "$STARS_HOST" "$SITE_HOST" "$SITE_WWW"; do
+for host in "$VEKIL_HOST" "$STARS_HOST" "$SITE_HOST"; do
   if cloudflared tunnel route dns "$TUNNEL_NAME" "$host" >/dev/null 2>&1; then
     ok "DNS: $host → $TUNNEL_NAME"
   else
@@ -207,8 +208,6 @@ ingress:
   - hostname: $STARS_HOST
     service: http://127.0.0.1:$STARS_PORT
   - hostname: $SITE_HOST
-    service: http://127.0.0.1:$SITE_PORT
-  - hostname: $SITE_WWW
     service: http://127.0.0.1:$SITE_PORT
   - service: http_status:404
 YML

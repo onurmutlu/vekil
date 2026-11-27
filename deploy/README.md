@@ -6,7 +6,7 @@
 git clone https://github.com/onurmutlu/vekil ~/siyahkare-apps/vekil && bash ~/siyahkare-apps/vekil/deploy/mac.sh
 ```
 
-`mac.sh` Vekil'i, Stars'ı ve kurumsal siteyi (SiyahKare/SK2026 → siyahkare.com) `~/siyahkare-apps` altına kurar, tek bir Cloudflare tunnel'ı
+`mac.sh` Vekil'i, Stars'ı ve kurumsal site taslağını (SiyahKare/SK2026 → site.siyahkare.com) `~/siyahkare-apps` altına kurar, tek bir Cloudflare tunnel'ı
 (`siyahkare-apps`) oluşturup `vekil.siyahkare.com` ve `stars.siyahkare.com` DNS kayıtlarını bağlar,
 üç servisi launchd ile kalıcı hale getirir (bilgisayar açılınca kendiliğinden başlar) ve botları Telegram'a bağlar.
 Tekrar çalıştırmak güvenlidir: kodu günceller, `.env` dosyalarını korur.
